@@ -34,13 +34,13 @@ Pre-written tests in [`backend/tests/unit/test_analytics.py`](../../../backend/t
 
 ## 1. Steps
 
-### 1.1. Follow the `Git workflow`
+### 1.1. Follow the usualy `Git workflow`
 
-Follow the [`Git workflow`](../../../wiki/git-workflow.md) to complete this task.
+Issue: `[Task] Analytics Endpoints`
 
-### 1.2. Create a `Lab Task` issue
+New branch: Base it on the latest version on `main` and name it appropriately.
 
-Title: `[Task] Analytics Endpoints`
+Do you remember the advice from the Task 1?
 
 ### 1.3. Read the tests and stubs
 
