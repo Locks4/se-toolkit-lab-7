@@ -13,6 +13,7 @@ Usage:
 import argparse
 import asyncio
 import sys
+import logging
 
 from config import load_config
 from handlers import (
@@ -25,13 +26,20 @@ from handlers import (
 )
 from services import LMSClient, LLMClient
 
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
 
 def parse_command(text: str) -> tuple[str, str]:
     """Parse a command string into command and arguments.
-    
+
     Args:
         text: The full command text (e.g., "/scores lab-04").
-    
+
     Returns:
         Tuple of (command, args).
     """
@@ -43,10 +51,10 @@ def parse_command(text: str) -> tuple[str, str]:
 
 def get_handler(command: str):
     """Get the appropriate handler for a command.
-    
+
     Args:
         command: The command name (e.g., "/start").
-    
+
     Returns:
         The handler function for the command.
     """
@@ -62,22 +70,22 @@ def get_handler(command: str):
 
 async def run_test_mode(command: str) -> None:
     """Run the bot in test mode.
-    
+
     Executes a command and prints the response to stdout.
-    
+
     Args:
         command: The command to execute (e.g., "/start").
     """
     config = load_config()
-    
+
     cmd, args = parse_command(command)
     handler = get_handler(cmd)
-    
+
     if handler:
         response = handler(args)
     else:
         response = handle_unknown(command)
-    
+
     # Try to enhance response with backend data if available
     if cmd == "/health":
         lms_client = LMSClient(config["LMS_API_URL"], config["LMS_API_KEY"])
@@ -90,35 +98,88 @@ async def run_test_mode(command: str) -> None:
             f"LLM Service: Checking...\n\n"
             f"{'All systems operational!' if is_healthy else 'Some services are unavailable.'}"
         )
-    
+
     print(response)
 
 
 async def run_production_mode() -> None:
-    """Run the bot in production mode with Telegram.
-    
-    Note: This is a placeholder for the full Telegram integration.
-    The actual implementation would use python-telegram-bot or similar.
-    """
+    """Run the bot in production mode with Telegram."""
+    from telegram import Update
+    from telegram.ext import (
+        Application,
+        CommandHandler,
+        MessageHandler,
+        ContextTypes,
+        filters,
+    )
+
     config = load_config()
-    
+
     if not config["BOT_TOKEN"]:
-        print("Error: BOT_TOKEN is not set. Please configure .env.bot.secret")
+        logger.error("BOT_TOKEN is not set. Please configure .env.bot.secret")
         sys.exit(1)
-    
-    print("Starting Telegram bot in production mode...")
-    print(f"LMS API URL: {config['LMS_API_URL']}")
-    print(f"Bot Token: {'*' * 8}{config['BOT_TOKEN'][-4:] if config['BOT_TOKEN'] else 'NOT SET'}")
-    print("\nNote: Full Telegram integration is a placeholder for Task 4.")
-    print("For now, use --test mode to test command handlers.")
-    
-    # Placeholder: In production, this would initialize the Telegram bot
-    # and start the event loop for handling updates.
-    # Example with python-telegram-bot:
-    # from telegram.ext import Application, CommandHandler
-    # application = Application.builder().token(config["BOT_TOKEN"]).build()
-    # application.add_handler(CommandHandler("start", telegram_handle_start))
-    # await application.run_polling()
+
+    logger.info("Starting Telegram bot in production mode...")
+    logger.info(f"LMS API URL: {config['LMS_API_URL']}")
+
+    # Create the Application
+    application = Application.builder().token(config["BOT_TOKEN"]).build()
+
+    async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /start command from Telegram."""
+        response = handle_start()
+        await update.message.reply_text(response)
+
+    async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help command from Telegram."""
+        response = handle_help()
+        await update.message.reply_text(response)
+
+    async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /health command from Telegram."""
+        lms_client = LMSClient(config["LMS_API_URL"], config["LMS_API_KEY"])
+        is_healthy = await lms_client.health_check()
+        backend_status = "✅ Online" if is_healthy else "❌ Offline"
+        response = (
+            "🏥 **Health Status**\n\n"
+            "Bot: ✅ Online\n"
+            f"Backend: {backend_status}\n"
+            "LLM Service: Checking...\n\n"
+            f"{'All systems operational!' if is_healthy else 'Some services are unavailable.'}"
+        )
+        await update.message.reply_text(response)
+
+    async def labs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /labs command from Telegram."""
+        response = handle_labs()
+        await update.message.reply_text(response)
+
+    async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /scores command from Telegram."""
+        args = " ".join(context.args) if context.args else ""
+        response = handle_scores(args)
+        await update.message.reply_text(response)
+
+    async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle non-command messages."""
+        text = update.message.text
+        response = (
+            f"Received your message: {text}\n\n"
+            "Use /help to see available commands."
+        )
+        await update.message.reply_text(response)
+
+    # Add handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("health", health_command))
+    application.add_handler(CommandHandler("labs", labs_command))
+    application.add_handler(CommandHandler("scores", scores_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Start the bot
+    logger.info("Bot is running. Press Ctrl+C to stop.")
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 def main() -> None:
@@ -132,9 +193,9 @@ def main() -> None:
         metavar="COMMAND",
         help="Run in test mode with the specified command (e.g., '/start')",
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.test:
         asyncio.run(run_test_mode(args.test))
         sys.exit(0)
