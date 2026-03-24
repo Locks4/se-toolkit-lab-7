@@ -27,7 +27,7 @@ from handlers import (
     handle_labs_async,
     handle_scores_async,
 )
-from services import LMSClient, LLMClient
+from services import LMSClient, LLMClient, IntentRouter
 
 # Configure logging
 logging.basicConfig(
@@ -58,25 +58,39 @@ async def run_test_mode(command: str) -> None:
     Executes a command and prints the response to stdout.
 
     Args:
-        command: The command to execute (e.g., "/start").
+        command: The command to execute (e.g., "/start" or "what labs are available").
     """
     config = load_config()
 
     cmd, args = parse_command(command)
 
-    # Handle commands with backend integration
-    if cmd == "/health":
-        response = await handle_health_async(config["LMS_API_URL"], config["LMS_API_KEY"])
-    elif cmd == "/labs":
-        response = await handle_labs_async(config["LMS_API_URL"], config["LMS_API_KEY"])
-    elif cmd == "/scores":
-        response = await handle_scores_async(args, config["LMS_API_URL"], config["LMS_API_KEY"])
-    elif cmd == "/start":
-        response = handle_start(args)
-    elif cmd == "/help":
-        response = handle_help(args)
+    # Check if it's a slash command or natural language
+    if cmd.startswith("/"):
+        # Handle commands with backend integration
+        if cmd == "/health":
+            response = await handle_health_async(config["LMS_API_URL"], config["LMS_API_KEY"])
+        elif cmd == "/labs":
+            response = await handle_labs_async(config["LMS_API_URL"], config["LMS_API_KEY"])
+        elif cmd == "/scores":
+            response = await handle_scores_async(args, config["LMS_API_URL"], config["LMS_API_KEY"])
+        elif cmd == "/start":
+            response = handle_start(args)
+        elif cmd == "/help":
+            response = handle_help(args)
+        else:
+            response = handle_unknown(command)
     else:
-        response = handle_unknown(command)
+        # Natural language - use intent router
+        # Full message is the command (including any args)
+        full_message = command
+        router = IntentRouter(
+            lms_url=config["LMS_API_URL"],
+            lms_api_key=config["LMS_API_KEY"],
+            llm_api_key=config["LLM_API_KEY"],
+            llm_base_url=config["LLM_API_BASE_URL"],
+            llm_model=config["LLM_API_MODEL"],
+        )
+        response = await router.route(full_message)
 
     print(response)
 
@@ -116,36 +130,38 @@ async def run_production_mode() -> None:
 
     async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /health command from Telegram."""
-        lms_client = LMSClient(config["LMS_API_URL"], config["LMS_API_KEY"])
-        is_healthy = await lms_client.health_check()
-        backend_status = "✅ Online" if is_healthy else "❌ Offline"
-        response = (
-            "🏥 **Health Status**\n\n"
-            "Bot: ✅ Online\n"
-            f"Backend: {backend_status}\n"
-            "LLM Service: Checking...\n\n"
-            f"{'All systems operational!' if is_healthy else 'Some services are unavailable.'}"
-        )
+        response = await handle_health_async(config["LMS_API_URL"], config["LMS_API_KEY"])
         await update.message.reply_text(response)
 
     async def labs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /labs command from Telegram."""
-        response = handle_labs()
+        response = await handle_labs_async(config["LMS_API_URL"], config["LMS_API_KEY"])
         await update.message.reply_text(response)
 
     async def scores_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /scores command from Telegram."""
-        args = " ".join(context.args) if context.args else ""
-        response = handle_scores(args)
+        lab_id = " ".join(context.args) if context.args else ""
+        if not lab_id:
+            await update.message.reply_text("Please specify a lab ID. Example: /scores lab-04")
+            return
+        response = await handle_scores_async(lab_id, config["LMS_API_URL"], config["LMS_API_KEY"])
         await update.message.reply_text(response)
 
     async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle non-command messages."""
+        """Handle non-command messages using LLM intent routing."""
         text = update.message.text
-        response = (
-            f"Received your message: {text}\n\n"
-            "Use /help to see available commands."
+        
+        # Create intent router
+        router = IntentRouter(
+            lms_url=config["LMS_API_URL"],
+            lms_api_key=config["LMS_API_KEY"],
+            llm_api_key=config["LLM_API_KEY"],
+            llm_base_url=config["LLM_API_BASE_URL"],
+            llm_model=config["LLM_API_MODEL"],
         )
+        
+        # Get response from LLM router
+        response = await router.route(text)
         await update.message.reply_text(response)
 
     # Add handlers
@@ -201,11 +217,21 @@ def run_production_mode_sync() -> None:
         await update.message.reply_text(response)
 
     async def handle_message(update, context):
+        """Handle non-command messages using LLM intent routing."""
         text = update.message.text
-        await update.message.reply_text(
-            f"Received your message: {text}\n\n"
-            "Use /help to see available commands."
+        
+        # Create intent router
+        router = IntentRouter(
+            lms_url=config["LMS_API_URL"],
+            lms_api_key=config["LMS_API_KEY"],
+            llm_api_key=config["LLM_API_KEY"],
+            llm_base_url=config["LLM_API_BASE_URL"],
+            llm_model=config["LLM_API_MODEL"],
         )
+        
+        # Get response from LLM router
+        response = await router.route(text)
+        await update.message.reply_text(response)
 
     # Add handlers
     from telegram import Update
