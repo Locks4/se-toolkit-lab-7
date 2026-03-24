@@ -272,14 +272,14 @@ For gibberish or unclear input, ask for clarification politely."""
         
         # Pass rate / lowest query (multi-step)
         if "lowest" in msg_lower and "pass rate" in msg_lower:
-            try:
-                # Get all labs
-                async with httpx.AsyncClient() as client:
+            # Get all labs
+            async with httpx.AsyncClient() as client:
+                try:
                     response = await client.get(f"{self.lms_url}/items/", headers=self.lms_headers, timeout=10.0)
                     response.raise_for_status()
                     items = response.json()
                     labs = [i for i in items if i.get("type") == "lab"][:5]  # Limit to 5 for multi-step
-                    
+
                     # Get pass rates for each
                     lab_rates = []
                     for lab in labs:
@@ -298,14 +298,12 @@ For gibberish or unclear input, ask for clarification politely."""
                                     lab_rates.append((lab.get("title", f"Lab {lab_id}"), avg))
                         except Exception:
                             continue
-                    
+
                     if lab_rates:
                         lowest = min(lab_rates, key=lambda x: x[1])
                         return f"The lab with the lowest pass rate is **{lowest[0]}** with an average of {lowest[1]:.1f}%."
                 except Exception:
                     pass
-            except Exception:
-                pass
             return "I couldn't analyze pass rates. Please try again later."
         
         # Default: helpful fallback
