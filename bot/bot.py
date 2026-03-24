@@ -182,6 +182,71 @@ async def run_production_mode() -> None:
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
+def run_production_mode_sync() -> None:
+    """Synchronous wrapper for production mode."""
+    from telegram.ext import Application
+
+    config = load_config()
+
+    if not config["BOT_TOKEN"]:
+        logger.error("BOT_TOKEN is not set. Please configure .env.bot.secret")
+        sys.exit(1)
+
+    logger.info("Starting Telegram bot in production mode...")
+    logger.info(f"LMS API URL: {config['LMS_API_URL']}")
+
+    # Create the Application
+    application = Application.builder().token(config["BOT_TOKEN"]).build()
+
+    # Define handlers using sync functions where possible
+    async def start_command(update, context):
+        await update.message.reply_text(handle_start())
+
+    async def help_command(update, context):
+        await update.message.reply_text(handle_help())
+
+    async def health_command(update, context):
+        lms_client = LMSClient(config["LMS_API_URL"], config["LMS_API_KEY"])
+        is_healthy = await lms_client.health_check()
+        backend_status = "✅ Online" if is_healthy else "❌ Offline"
+        response = (
+            "🏥 **Health Status**\n\n"
+            "Bot: ✅ Online\n"
+            f"Backend: {backend_status}\n"
+            "LLM Service: Checking...\n\n"
+            f"{'All systems operational!' if is_healthy else 'Some services are unavailable.'}"
+        )
+        await update.message.reply_text(response)
+
+    async def labs_command(update, context):
+        await update.message.reply_text(handle_labs())
+
+    async def scores_command(update, context):
+        args = " ".join(context.args) if context.args else ""
+        await update.message.reply_text(handle_scores(args))
+
+    async def handle_message(update, context):
+        text = update.message.text
+        await update.message.reply_text(
+            f"Received your message: {text}\n\n"
+            "Use /help to see available commands."
+        )
+
+    # Add handlers
+    from telegram import Update
+    from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("health", health_command))
+    application.add_handler(CommandHandler("labs", labs_command))
+    application.add_handler(CommandHandler("scores", scores_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Start the bot - run_polling handles its own event loop
+    logger.info("Bot is running. Press Ctrl+C to stop.")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
 def main() -> None:
     """Main entry point for the bot."""
     parser = argparse.ArgumentParser(
@@ -200,7 +265,8 @@ def main() -> None:
         asyncio.run(run_test_mode(args.test))
         sys.exit(0)
     else:
-        asyncio.run(run_production_mode())
+        # run_polling() manages its own event loop, so call it directly
+        run_production_mode_sync()
 
 
 if __name__ == "__main__":
