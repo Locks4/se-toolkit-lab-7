@@ -201,11 +201,14 @@ For gibberish or unclear input, ask for clarification politely."""
         ]
 
         # Try LLM first, fallback to keyword-based routing if LLM fails
-        try:
-            return await self._run_tool_loop(messages)
-        except Exception as e:
-            print(f"[DEBUG] LLM routing failed, using fallback: {e}", file=sys.stderr)
+        result = await self._run_tool_loop(messages)
+        
+        # Check if LLM returned an error message (fallback needed)
+        if "having trouble connecting" in result.lower() or "couldn't process" in result.lower():
+            print("[DEBUG] LLM returned error, using fallback routing", file=sys.stderr)
             return await self._fallback_route(message)
+        
+        return result
 
     async def _fallback_route(self, message: str) -> str:
         """Fallback routing when LLM is unavailable.
