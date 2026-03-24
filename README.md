@@ -91,3 +91,74 @@ By the end of this lab, you should be able to say:
 2. [Backend Integration](./lab/tasks/required/task-2.md) — P0: slash commands + real data
 3. [Intent-Based Natural Language Routing](./lab/tasks/required/task-3.md) — P1: LLM tool use
 4. [Containerize and Document](./lab/tasks/required/task-4.md) — P3: containerize + deploy
+
+## Deploy
+
+This section explains how to deploy the bot as a Docker container alongside the backend.
+
+### Prerequisites
+
+1. **Environment variables** — Make sure `.env.docker.secret` contains:
+   - `BOT_TOKEN` — Your Telegram bot token from @BotFather
+   - `LMS_API_KEY` — API key for backend authentication
+   - `LLM_API_KEY` — Qwen API key for natural language routing
+   - `LLM_API_BASE_URL` — Set to `http://host.docker.internal:42005/v1` for VM deployment
+
+2. **Qwen proxy** — The LLM API must be running on port 42005. On the VM:
+   ```bash
+   cd ~/qwen-code-oai-proxy
+   docker compose up -d
+   ```
+
+### Deploy steps
+
+1. **Stop any running bot process** (if you were using `nohup`):
+   ```bash
+   pkill -f "bot.py"
+   ```
+
+2. **Navigate to the project directory**:
+   ```bash
+   cd ~/se-toolkit-lab-7
+   ```
+
+3. **Start all services** (backend, postgres, bot, etc.):
+   ```bash
+   docker compose --env-file .env.docker.secret up --build -d
+   ```
+
+4. **Check container status**:
+   ```bash
+   docker compose --env-file .env.docker.secret ps
+   ```
+   You should see `backend`, `bot`, `postgres`, `caddy`, and `pgadmin` all showing "Up".
+
+5. **View bot logs**:
+   ```bash
+   docker compose --env-file .env.docker.secret logs -f bot
+   ```
+   Look for "Starting Telegram bot in production mode..." and no Python tracebacks.
+
+### Verification
+
+1. **Backend health check**:
+   ```bash
+   curl -sf http://localhost:42002/docs -H "Authorization: Bearer my-secret-api-key"
+   ```
+   Should return HTTP 200.
+
+2. **Test in Telegram**:
+   - Send `/start` to your bot — should receive a welcome message
+   - Send `/health` — should show backend status
+   - Send a plain text query like "what labs are available?" — should get a response
+
+3. **Check bot is running**:
+   ```bash
+   docker ps | grep bot
+   ```
+
+### Troubleshooting
+
+- **Bot not responding**: Check logs with `docker compose logs bot`
+- **LLM errors**: Verify Qwen proxy is running and accessible at `host.docker.internal:42005`
+- **Backend connection failed**: Ensure bot uses `LMS_API_URL=http://backend:8000` (Docker service name)
