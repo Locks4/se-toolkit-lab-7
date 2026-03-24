@@ -202,11 +202,17 @@ def format_scores_response(lab_id: str, scores: dict | list) -> str:
     # Handle list of task scores
     if isinstance(scores, list):
         for item in scores:
-            task_name = item.get("task_name", item.get("name", "Unknown"))
-            pass_rate = item.get("pass_rate", item.get("score", 0))
+            # Support multiple field name variants
+            task_name = item.get("task", item.get("task_name", item.get("name", "Unknown")))
+            pass_rate = item.get("pass_rate", item.get("avg_score", item.get("score", 0)))
+            attempts = item.get("attempts", "")
+            
             # Ensure percentage format with % sign
             if isinstance(pass_rate, (int, float)):
-                lines.append(f"  • {task_name}: {pass_rate:.1f}% pass rate")
+                if attempts:
+                    lines.append(f"  • {task_name}: {pass_rate:.1f}% pass rate ({attempts} attempts)")
+                else:
+                    lines.append(f"  • {task_name}: {pass_rate:.1f}% pass rate")
             else:
                 lines.append(f"  • {task_name}: {pass_rate}")
     
