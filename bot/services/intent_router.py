@@ -273,6 +273,46 @@ For gibberish or unclear input, ask for clarification politely."""
                     pass
             return f"I couldn't fetch scores for lab {lab_id}. Please try again later."
         
+        # Students/learners query
+        if "student" in msg_lower or "learner" in msg_lower or "enroll" in msg_lower:
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.get(f"{self.lms_url}/learners/", headers=self.lms_headers, timeout=10.0)
+                    response.raise_for_status()
+                    learners = response.json()
+                    count = len(learners) if isinstance(learners, list) else 0
+                    return f"There are {count} students enrolled in the system."
+                except Exception:
+                    # Try groups endpoint
+                    try:
+                        response = await client.get(f"{self.lms_url}/groups/", headers=self.lms_headers, timeout=10.0)
+                        response.raise_for_status()
+                        groups = response.json()
+                        total = sum(g.get("student_count", 0) for g in groups) if isinstance(groups, list) else 0
+                        return f"There are approximately {total} students enrolled across all groups."
+                    except Exception:
+                        pass
+            return "I couldn't fetch student enrollment data. Please try again later."
+        
+        # Sync data query
+        if "sync" in msg_lower or "refresh" in msg_lower or "update" in msg_lower:
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.post(
+                        f"{self.lms_url}/pipeline/sync",
+                        headers=self.lms_headers,
+                        json={},
+                        timeout=30.0
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    new_records = result.get("new_records", 0)
+                    total = result.get("total_records", 0)
+                    return f"✅ Sync complete! Loaded {new_records} new records. Total: {total} items in database."
+                except Exception:
+                    pass
+            return "I couldn't trigger data sync. Please try again later."
+        
         # Pass rate / lowest query (multi-step)
         if "lowest" in msg_lower and "pass rate" in msg_lower:
             # Get all labs
