@@ -111,26 +111,26 @@ async def handle_labs_async(lms_url: str, lms_api_key: str) -> str:
             response.raise_for_status()
             items = response.json()
             
-            # Extract unique labs from items
+            # Extract unique labs from items - labs have type="lab"
             labs = []
             seen_ids = set()
             for item in items:
-                lab_id = item.get("lab_id", item.get("lab", ""))
-                if lab_id and lab_id not in seen_ids:
-                    seen_ids.add(lab_id)
-                    labs.append({
-                        "id": lab_id,
-                        "name": item.get("lab_name", item.get("title", lab_id))
-                    })
+                if item.get("type") == "lab":
+                    lab_id = item.get("id", "")
+                    if lab_id and lab_id not in seen_ids:
+                        seen_ids.add(lab_id)
+                        labs.append({
+                            "id": str(lab_id),
+                            "name": item.get("title", item.get("name", f"Lab {lab_id}"))
+                        })
             
             if labs:
                 return handle_labs_list(labs)
             else:
-                # Fallback: try to get labs from a different endpoint
-                return "📋 **Available Labs**\n\nNo labs found in backend. Make sure data is synced."
+                return "📋 **Available Labs**\n\nNo labs found in backend."
                 
     except httpx.ConnectError:
-        return "📋 **Available Labs**\n\n⚠️ Cannot connect to backend. Please check if it's running."
+        return "📋 **Available Labs**\n\n⚠️ Cannot connect to backend."
     
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response else "unknown"
@@ -156,32 +156,32 @@ async def handle_scores_async(lab_id: str, lms_url: str, lms_api_key: str) -> st
     """
     headers = {"Authorization": f"Bearer {lms_api_key}"}
     
-    try:
-        async with httpx.AsyncClient() as client:
-            # Try GET /analytics/pass-rates?lab= endpoint
-            response = await client.get(
-                f"{lms_url}/analytics/pass-rates",
-                headers=headers,
-                params={"lab": lab_id},
-                timeout=10.0
-            )
-            response.raise_for_status()
-            scores = response.json()
-            
-            return format_scores_response(lab_id, scores)
+    # Try different lab ID formats
+    lab_id_variants = [
+        lab_id,
+        lab_id.replace("lab-", "Lab "),  # lab-04 -> Lab 04
+        lab_id.replace("lab-", ""),       # lab-04 -> 04
+    ]
+    
+    for variant in lab_id_variants:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{lms_url}/analytics/pass-rates",
+                    headers=headers,
+                    params={"lab": variant},
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                scores = response.json()
                 
-    except httpx.ConnectError:
-        return f"📊 Scores for {lab_id}:\n\n⚠️ Cannot connect to backend."
+                if scores:  # Got data
+                    return format_scores_response(lab_id, scores)
+        except (httpx.HTTPError, Exception):
+            continue  # Try next variant
     
-    except httpx.HTTPStatusError as e:
-        status_code = e.response.status_code if e.response else "unknown"
-        return f"📊 Scores for {lab_id}:\n\n⚠️ Backend returned HTTP {status_code}."
-    
-    except httpx.HTTPError as e:
-        return f"📊 Scores for {lab_id}:\n\n⚠️ Backend error: {str(e)[:50]}"
-    
-    except Exception as e:
-        return f"📊 Scores for {lab_id}:\n\n⚠️ Error: {str(e)[:50]}"
+    # If all variants fail, return error
+    return f"📊 Scores for {lab_id}:\n\n⚠️ No score data available for this lab."
 
 
 def format_scores_response(lab_id: str, scores: dict | list) -> str:
