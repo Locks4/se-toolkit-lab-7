@@ -19,10 +19,13 @@ from config import load_config
 from handlers import (
     handle_start,
     handle_help,
-    handle_health,
-    handle_labs,
-    handle_scores,
+    handle_health_backend,
+    handle_labs_list,
+    handle_scores_data,
     handle_unknown,
+    handle_health_async,
+    handle_labs_async,
+    handle_scores_async,
 )
 from services import LMSClient, LLMClient
 
@@ -49,25 +52,6 @@ def parse_command(text: str) -> tuple[str, str]:
     return command, args
 
 
-def get_handler(command: str):
-    """Get the appropriate handler for a command.
-
-    Args:
-        command: The command name (e.g., "/start").
-
-    Returns:
-        The handler function for the command.
-    """
-    handlers = {
-        "/start": handle_start,
-        "/help": handle_help,
-        "/health": handle_health,
-        "/labs": handle_labs,
-        "/scores": handle_scores,
-    }
-    return handlers.get(command, None)
-
-
 async def run_test_mode(command: str) -> None:
     """Run the bot in test mode.
 
@@ -79,25 +63,20 @@ async def run_test_mode(command: str) -> None:
     config = load_config()
 
     cmd, args = parse_command(command)
-    handler = get_handler(cmd)
 
-    if handler:
-        response = handler(args)
+    # Handle commands with backend integration
+    if cmd == "/health":
+        response = await handle_health_async(config["LMS_API_URL"], config["LMS_API_KEY"])
+    elif cmd == "/labs":
+        response = await handle_labs_async(config["LMS_API_URL"], config["LMS_API_KEY"])
+    elif cmd == "/scores":
+        response = await handle_scores_async(args, config["LMS_API_URL"], config["LMS_API_KEY"])
+    elif cmd == "/start":
+        response = handle_start(args)
+    elif cmd == "/help":
+        response = handle_help(args)
     else:
         response = handle_unknown(command)
-
-    # Try to enhance response with backend data if available
-    if cmd == "/health":
-        lms_client = LMSClient(config["LMS_API_URL"], config["LMS_API_KEY"])
-        is_healthy = await lms_client.health_check()
-        backend_status = "✅ Online" if is_healthy else "❌ Offline"
-        response = (
-            "🏥 **Health Status**\n\n"
-            f"Bot: ✅ Online\n"
-            f"Backend: {backend_status}\n"
-            f"LLM Service: Checking...\n\n"
-            f"{'All systems operational!' if is_healthy else 'Some services are unavailable.'}"
-        )
 
     print(response)
 
@@ -206,24 +185,20 @@ def run_production_mode_sync() -> None:
         await update.message.reply_text(handle_help())
 
     async def health_command(update, context):
-        lms_client = LMSClient(config["LMS_API_URL"], config["LMS_API_KEY"])
-        is_healthy = await lms_client.health_check()
-        backend_status = "✅ Online" if is_healthy else "❌ Offline"
-        response = (
-            "🏥 **Health Status**\n\n"
-            "Bot: ✅ Online\n"
-            f"Backend: {backend_status}\n"
-            "LLM Service: Checking...\n\n"
-            f"{'All systems operational!' if is_healthy else 'Some services are unavailable.'}"
-        )
+        response = await handle_health_async(config["LMS_API_URL"], config["LMS_API_KEY"])
         await update.message.reply_text(response)
 
     async def labs_command(update, context):
-        await update.message.reply_text(handle_labs())
+        response = await handle_labs_async(config["LMS_API_URL"], config["LMS_API_KEY"])
+        await update.message.reply_text(response)
 
     async def scores_command(update, context):
-        args = " ".join(context.args) if context.args else ""
-        await update.message.reply_text(handle_scores(args))
+        lab_id = " ".join(context.args) if context.args else ""
+        if not lab_id:
+            await update.message.reply_text("Please specify a lab ID. Example: /scores lab-04")
+            return
+        response = await handle_scores_async(lab_id, config["LMS_API_URL"], config["LMS_API_KEY"])
+        await update.message.reply_text(response)
 
     async def handle_message(update, context):
         text = update.message.text
