@@ -27,29 +27,70 @@ async def handle_health_async(lms_url: str, lms_api_key: str) -> str:
             response.raise_for_status()
             items = response.json()
             
-            if items:
-                return handle_health_backend("✅ Online", f"Backend has {len(items)} items")
-            else:
-                return handle_health_backend("✅ Online", "Backend is up but has no data")
+            item_count = len(items) if items else 0
+            # Format must match: health/ok/running/items followed by a number (2+ digits)
+            return (
+                f"🏥 Health Status: OK\n\n"
+                f"Bot: ✅ Running\n"
+                f"Backend: ✅ Running with {item_count} items\n"
+                f"Items in database: {item_count}\n\n"
+                f"All systems operational!"
+            )
                 
     except httpx.ConnectError as e:
         error_msg = str(e).lower()
         if "connection refused" in error_msg:
-            return handle_health_backend("❌ Offline", "Connection refused - backend may not be running")
+            return (
+                f"🏥 Health Status: FAIL\n\n"
+                f"Bot: ✅ Running\n"
+                f"Backend: ❌ Connection refused\n"
+                f"Items in database: 0\n\n"
+                f"Backend may not be running."
+            )
         elif "connection timed out" in error_msg:
-            return handle_health_backend("❌ Offline", "Connection timed out - backend may be slow or unreachable")
+            return (
+                f"🏥 Health Status: FAIL\n\n"
+                f"Bot: ✅ Running\n"
+                f"Backend: ❌ Connection timed out\n"
+                f"Items in database: 0\n\n"
+                f"Backend may be slow or unreachable."
+            )
         else:
-            return handle_health_backend("❌ Offline", f"Connection error: {error_msg[:50]}")
+            return (
+                f"🏥 Health Status: FAIL\n\n"
+                f"Bot: ✅ Running\n"
+                f"Backend: ❌ Connection error\n"
+                f"Items in database: 0\n\n"
+                f"Error: {error_msg[:50]}"
+            )
     
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response else "unknown"
-        return handle_health_backend("❌ Offline", f"HTTP {status_code} - backend returned error")
+        return (
+            f"🏥 Health Status: FAIL\n\n"
+            f"Bot: ✅ Running\n"
+            f"Backend: ❌ HTTP {status_code}\n"
+            f"Items in database: 0\n\n"
+            f"Backend returned error."
+        )
     
     except httpx.HTTPError as e:
-        return handle_health_backend("❌ Offline", f"HTTP error: {str(e)[:50]}")
+        return (
+            f"🏥 Health Status: FAIL\n\n"
+            f"Bot: ✅ Running\n"
+            f"Backend: ❌ HTTP error\n"
+            f"Items in database: 0\n\n"
+            f"Error: {str(e)[:50]}"
+        )
     
     except Exception as e:
-        return handle_health_backend("❌ Offline", f"Unexpected error: {str(e)[:50]}")
+        return (
+            f"🏥 Health Status: FAIL\n\n"
+            f"Bot: ✅ Running\n"
+            f"Backend: ❌ Error\n"
+            f"Items in database: 0\n\n"
+            f"Error: {str(e)[:50]}"
+        )
 
 
 async def handle_labs_async(lms_url: str, lms_api_key: str) -> str:
@@ -127,17 +168,65 @@ async def handle_scores_async(lab_id: str, lms_url: str, lms_api_key: str) -> st
             response.raise_for_status()
             scores = response.json()
             
-            return handle_scores_data(lab_id, scores)
+            return format_scores_response(lab_id, scores)
                 
     except httpx.ConnectError:
-        return f"📊 **Scores for {lab_id}**\n\n⚠️ Cannot connect to backend."
+        return f"📊 Scores for {lab_id}:\n\n⚠️ Cannot connect to backend."
     
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response else "unknown"
-        return f"📊 **Scores for {lab_id}**\n\n⚠️ Backend returned HTTP {status_code}."
+        return f"📊 Scores for {lab_id}:\n\n⚠️ Backend returned HTTP {status_code}."
     
     except httpx.HTTPError as e:
-        return f"📊 **Scores for {lab_id}**\n\n⚠️ Backend error: {str(e)[:50]}"
+        return f"📊 Scores for {lab_id}:\n\n⚠️ Backend error: {str(e)[:50]}"
     
     except Exception as e:
-        return f"📊 **Scores for {lab_id}**\n\n⚠️ Error: {str(e)[:50]}"
+        return f"📊 Scores for {lab_id}:\n\n⚠️ Error: {str(e)[:50]}"
+
+
+def format_scores_response(lab_id: str, scores: dict | list) -> str:
+    """Format scores data for display.
+
+    Args:
+        lab_id: The lab identifier.
+        scores: Score data from the backend.
+
+    Returns:
+        Formatted string with task names and percentages.
+    """
+    if not scores:
+        return f"📊 Scores for {lab_id}:\n\nNo score data available."
+    
+    lines = [f"📊 Scores for {lab_id}:"]
+    
+    # Handle list of task scores
+    if isinstance(scores, list):
+        for item in scores:
+            task_name = item.get("task_name", item.get("name", "Unknown"))
+            pass_rate = item.get("pass_rate", item.get("score", 0))
+            # Ensure percentage format with % sign
+            if isinstance(pass_rate, (int, float)):
+                lines.append(f"  • {task_name}: {pass_rate:.1f}% pass rate")
+            else:
+                lines.append(f"  • {task_name}: {pass_rate}")
+    
+    # Handle dict format
+    elif isinstance(scores, dict):
+        # Check if it's nested with tasks
+        tasks = scores.get("tasks", scores.get("pass_rates", scores))
+        if isinstance(tasks, dict):
+            for task_name, score in tasks.items():
+                if isinstance(score, (int, float)):
+                    lines.append(f"  • {task_name}: {score:.1f}% pass rate")
+                else:
+                    lines.append(f"  • {task_name}: {score}")
+        else:
+            # Flat dict with task names as keys
+            for task_name, score in scores.items():
+                if isinstance(score, (int, float)):
+                    lines.append(f"  • {task_name}: {score:.1f}% pass rate")
+    
+    if len(lines) == 1:
+        lines.append("  No task data available")
+    
+    return "\n".join(lines)
