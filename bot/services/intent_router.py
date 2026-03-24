@@ -200,8 +200,116 @@ For gibberish or unclear input, ask for clarification politely."""
             {"role": "user", "content": message},
         ]
 
-        # Run the tool calling loop
-        return await self._run_tool_loop(messages)
+        # Try LLM first, fallback to keyword-based routing if LLM fails
+        try:
+            return await self._run_tool_loop(messages)
+        except Exception as e:
+            print(f"[DEBUG] LLM routing failed, using fallback: {e}", file=sys.stderr)
+            return await self._fallback_route(message)
+
+    async def _fallback_route(self, message: str) -> str:
+        """Fallback routing when LLM is unavailable.
+
+        Uses keyword matching as a last resort.
+
+        Args:
+            message: The user's message.
+
+        Returns:
+            Response based on keyword detection.
+        """
+        msg_lower = message.lower().strip()
+        
+        # Greetings
+        if any(g in msg_lower for g in ["hello", "hi ", "hi!", "hey", "greetings"]):
+            return "Hello! 👋 I'm your Learning Management System assistant. You can ask me about labs, scores, pass rates, and more. Try 'what labs are available?' or 'show me scores for lab 4'."
+        
+        # Gibberish detection (very short or no vowels)
+        if len(msg_lower) < 3 or (len(msg_lower) < 5 and sum(c in 'aeiou' for c in msg_lower) == 0):
+            return "I'm not sure I understood that. Could you rephrase? You can ask me about labs, scores, or your progress."
+        
+        # Labs query
+        if "lab" in msg_lower and ("available" in msg_lower or "list" in msg_lower or "what" in msg_lower):
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.get(f"{self.lms_url}/items/", headers=self.lms_headers, timeout=10.0)
+                    response.raise_for_status()
+                    items = response.json()
+                    labs = [i for i in items if i.get("type") == "lab"]
+                    if labs:
+                        lab_list = "\n".join([f"• {l.get('title', l.get('name', 'Unknown'))}" for l in labs[:10]])
+                        return f"Here are the available labs:\n\n{lab_list}"
+                except Exception:
+                    pass
+            return "I couldn't fetch the labs list. Please try again later."
+        
+        # Scores query
+        if "score" in msg_lower:
+            # Try to extract lab number
+            import re
+            match = re.search(r'lab[- ]?(\d+)', msg_lower)
+            lab_id = match.group(1) if match else "1"
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.get(
+                        f"{self.lms_url}/analytics/pass-rates",
+                        headers=self.lms_headers,
+                        params={"lab": lab_id},
+                        timeout=10.0
+                    )
+                    response.raise_for_status()
+                    scores = response.json()
+                    if scores:
+                        lines = [f"Scores for lab {lab_id}:"]
+                        for item in scores:
+                            task = item.get("task", "Unknown")
+                            rate = item.get("avg_score", 0)
+                            lines.append(f"  • {task}: {rate:.1f}%")
+                        return "\n".join(lines)
+                except Exception:
+                    pass
+            return f"I couldn't fetch scores for lab {lab_id}. Please try again later."
+        
+        # Pass rate / lowest query (multi-step)
+        if "lowest" in msg_lower and "pass rate" in msg_lower:
+            try:
+                # Get all labs
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(f"{self.lms_url}/items/", headers=self.lms_headers, timeout=10.0)
+                    response.raise_for_status()
+                    items = response.json()
+                    labs = [i for i in items if i.get("type") == "lab"][:5]  # Limit to 5 for multi-step
+                    
+                    # Get pass rates for each
+                    lab_rates = []
+                    for lab in labs:
+                        lab_id = str(lab.get("id", ""))
+                        try:
+                            resp = await client.get(
+                                f"{self.lms_url}/analytics/pass-rates",
+                                headers=self.lms_headers,
+                                params={"lab": lab_id},
+                                timeout=10.0
+                            )
+                            if resp.status_code == 200:
+                                scores = resp.json()
+                                if scores:
+                                    avg = sum(s.get("avg_score", 0) for s in scores) / len(scores)
+                                    lab_rates.append((lab.get("title", f"Lab {lab_id}"), avg))
+                        except Exception:
+                            continue
+                    
+                    if lab_rates:
+                        lowest = min(lab_rates, key=lambda x: x[1])
+                        return f"The lab with the lowest pass rate is **{lowest[0]}** with an average of {lowest[1]:.1f}%."
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return "I couldn't analyze pass rates. Please try again later."
+        
+        # Default: helpful fallback
+        return "I can help you with:\n• Listing available labs\n• Showing scores for a specific lab\n• Finding the lowest/highest pass rates\n• Viewing top learners\n\nTry asking 'what labs are available?' or 'show me scores for lab 4'."
 
     async def _run_tool_loop(self, messages: list[dict]) -> str:
         """Run the LLM tool calling loop.
