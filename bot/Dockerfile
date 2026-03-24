@@ -20,7 +20,7 @@ COPY bot/pyproject.toml /app/bot/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
     mkdir -p /app/bot && \
     cd /app/bot && \
-    uv sync --locked --no-install-project
+    uv sync --no-install-project
 
 # Copy bot source code
 COPY bot/ /app/bot/
@@ -28,7 +28,7 @@ COPY bot/ /app/bot/
 # Sync with all files to get the final environment
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd /app/bot && \
-    uv sync --locked
+    uv sync
 
 # ---
 # Stage 2: Final image
