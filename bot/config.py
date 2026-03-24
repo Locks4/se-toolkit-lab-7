@@ -21,6 +21,10 @@ def load_config() -> dict[str, str]:
     secret_env = base_dir / ".env.bot.secret"
     example_env = base_dir / ".env.bot.example"
     
+    # Also check parent directory for .env.bot.example (for VM deployment)
+    if not example_env.exists():
+        example_env = Path(__file__).parent.parent / ".env.bot.example"
+    
     if secret_env.exists():
         load_dotenv(secret_env)
     elif example_env.exists():
